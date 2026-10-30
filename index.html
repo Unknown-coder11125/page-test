@@ -51,6 +51,8 @@ button.d{background:#fff;color:#a5372b;border-color:#e0b8b2}
 .c{border:1px solid #d6d2c4}
 .c.back{background:repeating-linear-gradient(45deg,#e6e2d6,#e6e2d6 4px,#dcd7c9 4px,#dcd7c9 8px)}
 .tag{color:#fff}
+.tm{display:none;position:relative;border:2px solid var(--gold);border-radius:12px;padding:8px 12px;margin:8px 0;overflow:hidden;background:#fff;font-weight:600}
+.tm.on{display:block}.tb{position:absolute;left:0;bottom:0;height:4px;background:var(--gold)}.tm span{position:relative}
 #chat{position:fixed;z-index:20;background:#fff;border:1px solid var(--line);display:none;flex-direction:column}
 #chat.open{display:flex}
 .ch{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);font:500 16px Georgia,serif}
@@ -69,6 +71,7 @@ body.g #cb{display:block}
 <aside id="chat"><div class="ch">채팅<button onclick="tg()">닫기</button></div><div id="ml"></div>
 <div class="cr"><input id="ci" placeholder="메시지 입력" maxlength="200" autocomplete="off" onkeydown="if(event.key==='Enter')sc()"><button class="p" onclick="sc()">전송</button></div></aside>
 <button id="cb" onclick="tg()">채팅</button>
+<div id="rc" style="display:none;position:fixed;top:0;left:0;right:0;z-index:30;background:#d97757;color:#fff;text-align:center;padding:6px;font-size:14px">재접속 중…</div>
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script>
 const $=s=>document.querySelector(s),SU='♠♥♦♣',RK='23456789TJQKA',START=400,
@@ -109,11 +112,11 @@ function best(c){let b=null;
  return b}
 /* ---------- 방장 게임 엔진 ---------- */
 function startHand(){
- clearTimeout(G.tm);
+ clearTimeout(G.tm);clearTimeout(G.tt);G.hold=null;G.away=false;
  const P=G.players;P.forEach(p=>{if(p.stack<=0)p.out=true});
  const al=P.filter(p=>!p.out);
  if(al.length<2){G.stage='over';G.done=true;G.msg='게임 종료: '+(al[0]?al[0].name:'-')+' 우승!';sync();return}
- G.hand++;G.lv=1+Math.floor((G.hand-1)/10);G.sb=G.lv;G.bb=G.lv*2;
+ G.hand++;G.lv=1+Math.floor((G.hand-1)/10);G.sb=2**(G.lv-1);G.bb=G.sb*2;
  G.msg=(G.hand>1&&G.hand%10==1)?`블라인드 업! ${G.sb}/${G.bb}`:'';
  G.btn=G.btn<0?P.findIndex(p=>!p.out):nxt(G.btn,p=>!p.out);
  const d=[...Array(52).keys()];
@@ -129,7 +132,7 @@ function advance(from){
  const lv=G.players.filter(live);
  if(lv.length==1){win(lv[0]);return}
  const j=nxt(from,p=>canAct(p)&&(!p.acted||p.bet<G.cur));
- if(j>=0){G.to=j;sync();return}
+ if(j>=0){G.to=j;arm();sync();return}
  street()}
 function street(){
  const P=G.players;P.forEach(p=>{p.bet=0;p.acted=false});G.cur=0;G.min=G.bb;
@@ -137,11 +140,14 @@ function street(){
  const n={pre:'flop',flop:'turn',turn:'river'}[G.stage];G.stage=n;
  for(let i=0;i<(n=='flop'?3:1);i++)G.board.push(G.deck.pop());
  if(P.filter(canAct).length<2){street();return}
- G.to=nxt(G.btn,canAct);sync()}
+ G.to=nxt(G.btn,canAct);arm();sync()}
 function win(p){
  const pot=G.players.reduce((s,q)=>s+q.tot,0);p.stack+=pot;
- G.stage='end';G.done=true;G.rev=false;G.msg=`${p.name} +${pot} (상대 전원 폴드)`;nextSoon();sync()}
-function nextSoon(){clearTimeout(G.tm);G.tm=setTimeout(startHand,5000)}
+ G.stage='end';G.done=true;G.rev=false;G.msg=`${p.name} +${pot} (상대 전원 폴드)`;G.log.unshift('🏆 '+G.msg);G.last=G.msg;nextSoon();sync()}
+function nextSoon(){
+ clearTimeout(G.tm);clearTimeout(G.tt);G.dl=0;
+ if(G.away){G.hold={since:Date.now(),ok:[]};G.away=false}
+ else G.tm=setTimeout(startHand,6000)}
 function showdown(){
  const P=G.players;G.stage='show';G.rev=true;G.done=true;
  const sc={};P.forEach((p,i)=>{if(live(p))sc[i]=best([...p.hole,...G.board])});
@@ -155,10 +161,11 @@ function showdown(){
   w.forEach(i=>{P[i].stack+=sh;won[i]=(won[i]||0)+sh});
   P[w[0]].stack+=pot-sh*w.length;won[w[0]]+=pot-sh*w.length;prev=L});
  G.msg=Object.keys(won).map(i=>`${P[i].name} +${won[i]} (${HN[sc[i][0]]})`).join(' / ');
- nextSoon();sync()}
+ G.log.unshift('🏆 '+G.msg);G.last=G.msg;nextSoon();sync()}
 function act(i,a,amt){
  if(!G||G.done||G.to!==i||i<0)return;
  const p=G.players[i],need=G.cur-p.bet;
+ clearTimeout(G.tt);if(!G.auto)p.away=false;
  if(a=='fold'&&need>0){p.fold=true;G.log.unshift(`${p.name}: 폴드`)}
  else if(a=='raise'){
   const mx=p.bet+p.stack;let t=Math.min(Math.floor(+amt||0),mx);
@@ -174,8 +181,8 @@ function act(i,a,amt){
 function view(i){
  const P=G.players;
  return{me:i,hand:G.hand,sb:G.sb,bb:G.bb,stage:G.stage,board:G.board,to:G.to,btn:G.btn,cur:G.cur,min:G.min,
-  done:G.done,msg:G.msg,log:G.log.slice(0,5),over:G.stage=='over',pot:P.reduce((s,p)=>s+p.tot,0),
-  ps:P.map((p,j)=>({n:p.name,st:p.stack,bet:p.bet,fold:p.fold&&!p.out,out:p.out,al:p.allin,
+  done:G.done,msg:G.msg,log:G.log.slice(0,8),hold:G.hold?(()=>{const rq=P.map((q,j)=>j).filter(j=>!P[j].out&&!P[j].bot);return{n:rq.length,c:rq.filter(j=>G.hold.ok.includes(j)).length,age:Date.now()-G.hold.since,me:G.hold.ok.includes(i)}})():null,left:G.dl?Math.max(0,G.dl-Date.now()):0,last:G.last||'',over:G.stage=='over',pot:P.reduce((s,p)=>s+p.tot,0),
+  ps:P.map((p,j)=>({n:p.name,st:p.stack,bet:p.bet,fold:p.fold&&!p.out,out:p.out,al:p.allin,dc:!!p.dc,aw:!!p.away,
    h:p.hole.length?(j==i||(G.rev&&!p.fold)?p.hole:[-1,-1]):[],
    hn:G.rev&&!p.fold&&p.hole.length?HN[best([...p.hole,...G.board])[0]]:''}))}}
 function sync(){
@@ -195,32 +202,53 @@ function hostRoom(){
  peer.on('connection',c=>{
   c.on('data',m=>{
    if(m.t=='join'){
+    const ex=m.tok&&G.players.find(p=>p.tok===m.tok&&!p.bot);
+    if(ex){const o=ex.conn;ex.conn=c;ex.dc=false;ex.away=false;if(o&&o!==c)try{o.close()}catch(x){}
+     if(!G.done&&G.stage!='wait'&&G.players[G.to]===ex)arm();sync();bc();return}
     if(G.stage!='wait'||G.players.length>=6){c.send({t:'full'});return}
-    G.players.push(mk(String(m.name).slice(0,10),c));sync();bc()}
+    const np=mk(String(m.name).slice(0,10),c);np.tok=m.tok;G.players.push(np);sync();bc()}
    else if(m.t=='chat'){const i=G.players.findIndex(p=>p.conn===c);if(i>0)addChat(i,m.m)}
-   else if(m.t=='act')act(G.players.findIndex(p=>p.conn===c),m.a,m.amt)});
+   else if(m.t=='act')act(G.players.findIndex(p=>p.conn===c),m.a,m.amt);
+   else if(m.t=='go')goH(G.players.findIndex(p=>p.conn===c));
+   else if(m.t=='leave')leaveP(c)});
   c.on('close',()=>{
    const i=G.players.findIndex(p=>p.conn===c);if(i<0)return;
    if(G.stage=='wait')G.players.splice(i,1);
-   else{
-    const p=G.players[i];p.out=true;p.fold=true;
-    if(!G.done){
-     const lv=G.players.filter(live);
-     if(lv.length==1)win(lv[0]);else if(G.to==i)advance(i);else sync()}
-    else sync()}
+   else{const p=G.players[i];p.dc=true;if(!G.done&&G.to===i)arm();sync()}
    if(G.stage=='wait')sync()})})}
-function joinRoom(id){
- const name=nm();myn=name;
+let sess=null,tries=0,joined=false,off=false,vt=0,lastV=null;
+function retry(id){
+ if(off||isHost)return;
+ if(tries++>=30){$('#rc').style.display='none';$('#app').innerHTML='<h1>연결 끊김</h1><p class="sub">다시 연결하지 못했습니다. 링크를 다시 열어 주세요.</p>';return}
+ $('#rc').style.display='block';
+ clearTimeout(window.rt);window.rt=setTimeout(()=>joinRoom(id,true),3000)}
+function joinRoom(id,auto){
+ try{sess=JSON.parse(localStorage.getItem('hq')||'null')}catch(x){sess=null}
+ if(!(sess&&sess.room==id))sess={room:id,tok:Math.random().toString(36).slice(2)+Date.now().toString(36),name:''};
+ if(!auto||!sess.name)sess.name=nm();
+ const name=sess.name;myn=name;
+ try{localStorage.setItem('hq',JSON.stringify(sess))}catch(x){}
+ if(!auto){tries=0;off=false}
+ try{peer&&peer.destroy()}catch(x){}
  peer=new Peer(undefined,PO);
- peer.on('error',e=>alert(perr(e)));
+ peer.on('error',e=>{if(joined||auto)retry(id);else alert(perr(e))});
  peer.on('open',()=>{
-  hostConn=peer.connect(id,{reliable:true});
-  setTimeout(()=>{if(!hostConn.open)alert('연결이 지연됩니다. 방장이 방을 열어 둔 상태인지 확인하고, 다른 네트워크(데이터/VPN)로도 시도해 보세요.')},15000);
-  hostConn.on('open',()=>hostConn.send({t:'join',name}));
-  hostConn.on('data',m=>{
-   if(m.t=='v')render(m.v);if(m.t=='chat')renderChat(m.c);if(m.t=='kick'){$('#app').innerHTML='<h1>입장 취소</h1><p class="sub">방장이 대기실에서 내보냈습니다.</p>';$('#chat').classList.remove('open');document.body.classList.remove('g')}
-   if(m.t=='full')alert('입장할 수 없습니다. 이미 게임 중이거나 6명이 모두 찼습니다.')});
-  hostConn.on('close',()=>{$('#app').innerHTML='<h1>연결 끊김</h1><p class="sub">방장이 나갔거나 연결이 끊겼습니다. 링크를 다시 열어 입장하세요.</p>'})})}
+  const hc=hostConn=peer.connect(id,{reliable:true});
+  setTimeout(()=>{if(hc===hostConn&&!hc.open){if(joined||auto)retry(id);else alert('연결이 지연됩니다. 방장이 방을 열어 둔 상태인지 확인하고, 다른 네트워크(데이터/VPN)로도 시도해 보세요.')}},15000);
+  hc.on('open',()=>hc.send({t:'join',name,tok:sess.tok}));
+  hc.on('data',m=>{
+   if(m.t=='v'){joined=true;tries=0;$('#rc').style.display='none';render(m.v)}
+   if(m.t=='chat')renderChat(m.c);
+   if(m.t=='kick'){off=true;try{localStorage.removeItem('hq')}catch(x){}$('#app').innerHTML='<h1>입장 취소</h1><p class="sub">방장이 대기실에서 내보냈습니다.</p>';$('#chat').classList.remove('open');document.body.classList.remove('g')}
+   if(m.t=='full'){off=true;alert('입장할 수 없습니다. 이미 게임 중이거나 6명이 모두 찼습니다.')}});
+  hc.on('close',()=>{if(hc===hostConn)retry(id)})})}
+function leave(){
+ if(!confirm('나가면 이 게임의 칩이 사라집니다. 나갈까요?'))return;
+ off=true;try{hostConn.send({t:'leave'})}catch(x){}try{localStorage.removeItem('hq')}catch(x){}
+ setTimeout(()=>{try{peer.destroy()}catch(x){}},300);
+ $('#app').innerHTML='<h1>나갔습니다</h1><p class="sub">이 방에서 나왔습니다. 다시 들어오려면 링크를 새로 여세요.</p>';
+ $('#chat').classList.remove('open');document.body.classList.remove('g')}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!isHost&&joined&&!off){tries=0;joinRoom(location.hash.slice(1),true)}});
 const send=(a,amt)=>isHost?act(0,a,amt):hostConn.send({t:'act',a,amt});
 const setR=x=>{rv=x;$('#rv').value=x};
 const copyLk=()=>navigator.clipboard.writeText(link).then(()=>alert('링크를 복사했습니다'));
@@ -230,9 +258,10 @@ const cd=c=>{if(c<0)return'<span class="c back"></span>';
  return`<span class="c ${s==1||s==2?'r':''}">${r=='T'?'10':r}<i>${SU[s]}</i></span>`};
 const seat=(p,i,v)=>`<div class="seat ${i==v.me?'me ':''}${i==v.to&&!v.done?'to ':''}${p.fold||p.out?'f':''}">
 <div class="n"><span>${esc(p.n)}${i==v.btn?'<span class="tag">D</span>':''}</span><span class="st">${p.st}</span></div>
-<div class="bt">${p.out?'탈락':p.fold?'폴드':p.al?'올인 ':''}${p.bet?'베팅 '+p.bet:''}</div>
+<div class="bt">${p.out?'탈락':(p.dc?'연결 끊김 ':p.aw?'자리비움 ':'')+(p.fold?'폴드':p.al?'올인 ':'')}${p.bet?'베팅 '+p.bet:''}</div>
 <div class="cs">${p.h.map(cd).join('')}</div><div class="st">${p.hn}</div></div>`;
 function render(v){
+ lastV=v;vt=Date.now();
  document.body.classList.add('g');
  const A=$('#app');
  if(v.stage=='wait'){
@@ -242,7 +271,7 @@ function render(v){
   <input id="lk" readonly value="${esc(link)}" onclick="this.select()">
   <div class="row"><button onclick="copyLk()">링크 복사</button><button onclick="addBot()" ${v.ps.length>=6?'disabled':''}>컴퓨터 추가</button>
   <button class="p" onclick="startHand()" ${v.ps.length<2?'disabled':''}>게임 시작</button></div>`
-  :'<p class="sub">방장이 게임을 시작하길 기다리는 중입니다.</p>'}`;return}
+  :'<p class="sub">방장이 게임을 시작하길 기다리는 중입니다.</p><button onclick="leave()">나가기</button>'}`;return}
  const me=v.ps[v.me],mine=v.to==v.me&&!v.done,need=Math.max(0,v.cur-me.bet),mx=me.bet+me.st;
  const key=v.hand+v.stage+v.to+v.cur;
  if(key!=rk){rk=key;rv=Math.min(v.cur+Math.max(v.min,v.bb),mx)}
@@ -254,14 +283,14 @@ function render(v){
  <button onclick="send('raise',rv)">${v.cur?'레이즈':'벳'}</button></div>
  <div class="row"><button onclick="setR(${pr(.5)})">½팟</button><button onclick="setR(${pr(.75)})">¾팟</button>
  <button onclick="setR(${pr(1)})">팟</button><button onclick="setR(${mx})">올인</button></div>`:''}`;
- else if(v.done&&!v.over)ctl='<p class="sub">5초 뒤 다음 핸드가 자동으로 시작됩니다.</p>';
+ else if(v.done&&!v.over)ctl=v.hold?`<p class="sub">자리비움이 있어 다음 핸드를 보류했습니다. 모두 '진행'을 누르면 시작됩니다.</p><div class="msg" id="hd"></div><div class="row"><button class="p" onclick="goBtn()" ${v.hold.me?'disabled':''}>진행</button>${isHost?'<button onclick="force()">강제 진행</button>':''}</div>`:'<p class="sub">6초 뒤 다음 핸드가 자동으로 시작됩니다.</p>';
  else if(!v.done)ctl=`<p class="sub">${esc(v.ps[v.to].n)} 차례입니다.</p>`;
- A.innerHTML=`<div class="bar"><span>핸드 #${v.hand}</span><span>블라인드 ${v.sb}/${v.bb}</span></div>
+ A.innerHTML=`<div class="bar"><span>핸드 #${v.hand}</span><span>블라인드 ${v.sb}/${v.bb}</span></div>${isHost?'':'<div style="text-align:right"><button style="padding:4px 10px;font-size:13px" onclick="leave()">나가기</button></div>'}
  <div class="table"><div class="pot">팟 ${v.pot}</div><div class="board">${v.board.map(cd).join('')}</div></div>
- ${v.msg?`<div class="msg">${esc(v.msg)}</div>`:''}
- <div class="seats">${v.ps.map((p,i)=>seat(p,i,v)).join('')}</div>
+ ${v.msg?`<div class="msg">${esc(v.msg)}</div>`:''}${!v.msg&&v.last?`<div class="st">지난 핸드: ${esc(v.last)}</div>`:''}
+ <div id="tm" class="tm"></div><div class="seats">${v.ps.map((p,i)=>seat(p,i,v)).join('')}</div>
  <div style="margin-top:12px">${ctl}</div>
- <div class="log">${v.log.map(esc).join('<br>')}</div>`}
+ <div class="log">${v.log.map(esc).join('<br>')}</div>`;tick()}
 /* ---------- 시작 ---------- */
 const id=location.hash.slice(1);
 $('#app').innerHTML=`<h1>페이지 만들기 테스트</h1><p class="sub">${id?'친구가 만든 방에 입장합니다.':'방을 만들고 링크를 친구에게 보내세요.'}</p>
@@ -294,4 +323,43 @@ function botAct(i){
  else if(s>.82&&Math.random()<.5&&!big)act(i,'raise',to());
  else if(s>.55||(s>need/(pot+need)+.2&&!big)||s>.7)act(i,'call');
  else act(i,'fold')}
+const TL=30000,AW=5000,DC=3000;
+function arm(){
+ clearTimeout(G.tt);G.dl=0;
+ if(G.done||G.stage=='wait'||G.stage=='over')return;
+ const p=G.players[G.to];if(!p||p.bot)return;
+ const ms=p.dc?DC:p.away?AW:TL,t=G.to;G.dl=Date.now()+ms;G.tt=setTimeout(()=>timeout(t),ms)}
+function timeout(i){
+ if(!G||G.done||G.to!==i)return;
+ const p=G.players[i];p.away=true;G.away=true;
+ G.log.unshift(`${p.name}: 시간 초과(자리비움)`);
+ G.auto=true;act(i,G.cur>p.bet?'fold':'call');G.auto=false}
+function chk(){
+ if(!G.hold)return;
+ const rq=G.players.map((p,i)=>i).filter(i=>!G.players[i].out&&!G.players[i].bot);
+ if(rq.every(i=>G.hold.ok.includes(i)))startHand()}
+function goH(i){
+ if(!G||!G.hold||i<0)return;
+ G.players[i].away=false;if(!G.hold.ok.includes(i))G.hold.ok.push(i);
+ chk();if(G.hold)sync()}
+function leaveP(c){
+ const i=G.players.findIndex(p=>p.conn===c);if(i<0)return;
+ if(G.stage=='wait'){G.players.splice(i,1);sync();bc();return}
+ const p=G.players[i];p.out=true;p.fold=true;p.conn=null;G.log.unshift(`${p.name}: 나감`);
+ if(!G.done){const lv=G.players.filter(live);if(lv.length==1)win(lv[0]);else if(G.to==i)advance(i);else sync()}
+ else{chk();if(!G.hold||G.hold)sync()}}
+const goBtn=()=>isHost?goH(0):hostConn.send({t:'go'});
+const force=()=>{if(isHost&&G.hold)startHand()};
+function tick(){
+ const v=lastV,el=$('#tm');if(!v||!el)return;
+ const d=Date.now()-vt;
+ if(v.left>0&&!v.done){
+  const r=v.left-d,pl=v.ps[v.to];
+  if(r>0&&r<=10000){el.className='tm on';el.innerHTML=`<div class="tb" style="width:${r/100}%"></div><span>${esc(pl.n)} · ${Math.ceil(r/1000)}초 뒤 자동 ${v.cur>pl.bet?'폴드':'체크'}</span>`}
+  else el.className='tm'}
+ else el.className='tm';
+ const h=$('#hd');
+ if(h&&v.hold){const m=Math.floor((v.hold.age+d)/60000);h.textContent=`진행 ${v.hold.c}/${v.hold.n} · ${m>0?m+'분째 대기중':'대기중'}`}}
+setInterval(tick,250);
+try{const sv=JSON.parse(localStorage.getItem('hq')||'null');if(id&&sv&&sv.room==id&&sv.name){tries=0;$('#nm').value=sv.name;joinRoom(id,true)}}catch(x){}
 </script></body></html>
