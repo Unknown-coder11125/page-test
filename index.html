@@ -105,11 +105,11 @@ function sc5(c){
  if(g[0][0]==2&&g[1][0]==2)return[2,...k];if(g[0][0]==2)return[1,...k];
  return[0,...rs]}
 const cmp=(a,b)=>{for(let i=0;i<Math.max(a.length,b.length);i++){const d=(a[i]||0)-(b[i]||0);if(d)return d}return 0};
-function best(c){let b=null;
- for(let i=0;i<c.length;i++)for(let j=i+1;j<c.length;j++){
-  const h=c.filter((_,k)=>k!=i&&k!=j).map(x=>({r:x%13,s:Math.floor(x/13)})),s=sc5(h);
-  if(!b||cmp(s,b)>0)b=s}
- return b}
+function best(c){let b=null;const n=c.length;
+ const rec=(st,ch)=>{
+  if(ch.length==5){const x=sc5(ch.map(v=>({r:v%13,s:Math.floor(v/13)})));if(!b||cmp(x,b)>0)b=x;return}
+  for(let i=st;i<n;i++)rec(i+1,[...ch,c[i]])};
+ rec(0,[]);return b}
 /* ---------- 방장 게임 엔진 ---------- */
 function startHand(){
  clearTimeout(G.tm);clearTimeout(G.tt);G.hold=null;G.away=false;
@@ -309,20 +309,40 @@ function tg(){const e=$('#chat');e.classList.toggle('open');if(e.classList.conta
 function sc(){const i=$('#ci'),m=i.value.trim();if(!m)return;i.value='';isHost?addChat(0,m):hostConn.send({t:'chat',m})}
 function kick(i){if(G.stage!='wait')return;const p=G.players.splice(i,1)[0];if(p.conn){p.conn.send({t:'kick'});setTimeout(()=>p.conn.close(),300)}sync();bc()}
 const BN=['한도윤','민서','태현','지후','수아'];
-function addBot(){if(!G||G.stage!='wait'||G.players.length>=6)return;G.players.push(Object.assign(mk(BN[G.players.filter(p=>p.bot).length%5]),{bot:true}));sync()}
+/* 스타일: 한도윤=타이트 공격형, 민서=루즈 공격형, 태현=콜링스테이션, 지후=매니악, 수아=락(아주 타이트) */
+const ST=[{vp:.02,ag:.7,bl:.12,st:0},{vp:.14,ag:.85,bl:.3,st:.05},{vp:.2,ag:.2,bl:.03,st:.22},{vp:.24,ag:.95,bl:.45,st:.1},{vp:-.1,ag:.6,bl:.02,st:-.04}];
+function addBot(){if(!G||G.stage!='wait'||G.players.length>=6)return;const k=G.players.filter(p=>p.bot).length%5;G.players.push(Object.assign(mk(BN[k]),{bot:true,sty:k}));sync()}
+const ps=h=>{const a=h[0]%13,b=h[1]%13,hi=Math.max(a,b),lo=Math.min(a,b);
+ return(hi+lo)/24*.7+(a==b?.45+hi/30:0)+(Math.floor(h[0]/13)==Math.floor(h[1]/13)?.06:0)+(hi-lo<=2&&a!=b?.04:0)};
+function pstr(h,B){
+ const all=[...h,...B],R=all.map(x=>x%13),hr=h.map(x=>x%13),br=B.map(x=>x%13),mb=Math.max(...br),c=best(all)[0];
+ const cn={};br.forEach(x=>cn[x]=(cn[x]||0)+1);
+ const bm=Object.values(cn).sort((x,y)=>y-x),bc=bm[0]==4?7:bm[0]==3?(bm[1]==2?6:3):bm[0]==2?(bm[1]==2?2:1):0;
+ let s=[.2,.45,.62,.74,.82,.86,.93,.98,1][c];
+ if(c<=bc&&c<4)s=[.12,.2,.4,.55][c]+Math.max(...hr)/12*.14;
+ else if(c==1){const m=hr.find(x=>br.includes(x));
+  if(hr[0]==hr[1])s=hr[0]>mb?.62:.4;else s=m!==undefined&&m==mb?.56+m/12*.08:.42}
+ if(B.length<5&&c<4){
+  const su=[0,0,0,0];all.forEach(x=>su[Math.floor(x/13)]++);
+  const fd=h.some(x=>su[Math.floor(x/13)]>=4),ds=new Set(R);let sd=0;
+  for(let k=-1;k<=8;k++){let n=0;for(let j=0;j<5;j++){const x=k+j;if(ds.has(x<0?12:x))n++}if(n>=4)sd=1}
+  s+=(fd?.12:0)+(sd?.08:0)}
+ return s}
 function botAct(i){
  if(!G||G.done||G.to!==i)return;
- const p=G.players[i],need=G.cur-p.bet,pot=G.players.reduce((s,q)=>s+q.tot,0),bb=G.bb;let s;
- if(!G.board.length){const a=p.hole[0]%13,b=p.hole[1]%13,hi=Math.max(a,b),lo=Math.min(a,b);
-  s=(hi+lo)/24*.6+(a==b?.35+hi/40:0)+(Math.floor(p.hole[0]/13)==Math.floor(p.hole[1]/13)?.06:0)+(hi-lo<=2?.04:0)}
- else{const b=best([...p.hole,...G.board]);s=[.2,.45,.62,.74,.82,.86,.93,.98,1][b[0]]+(b[0]==1?b[1]/12*.12:0)}
- s+=(Math.random()-.5)*.25;
- const big=need>pot*.6+bb*3;
- const to=()=>!G.board.length&&G.cur<=bb?Math.round(bb*(2.5+Math.random()*.7)):G.cur+Math.max(G.min,Math.round((pot+need)*(.4+Math.random()*.4)));
- if(!need)act(i,(s>.62&&Math.random()<.75)||(s>.3&&Math.random()<.12)?'raise':'call',to());
- else if(s>.82&&Math.random()<.5&&!big)act(i,'raise',to());
- else if(s>.55||(s>need/(pot+need)+.2&&!big)||s>.7)act(i,'call');
- else act(i,'fold')}
+ try{
+  const p=G.players[i],S=ST[p.sty||0],need=G.cur-p.bet,pot=G.players.reduce((q,x)=>q+x.tot,0),bb=G.bb,pre=!G.board.length;
+  const e=(pre?ps(p.hole):pstr(p.hole,G.board))+S.vp+(Math.random()-.5)*.24,r=need/(pot+need||1);
+  const to=()=>pre?Math.round(G.cur<=bb?bb*(2.2+Math.random()*1.3):G.cur*(2.6+Math.random()*.8)):G.cur+Math.max(G.min,Math.round((pot+need)*(.33+Math.random()*.5)*(S.ag>.9?1.4:1)));
+  const open=pre&&G.cur<=bb;
+  if(!need)act(i,((e>.62&&Math.random()<S.ag)||(e>.4&&Math.random()<S.ag*.35)||Math.random()<S.bl*(e<.45?1:.4))?'raise':'call',to());
+  else{
+   const big=need>pot*.75+bb*4,thr=.28+r*.9+(big?.1:0)-S.st;
+   if((open&&e>.62&&Math.random()<S.ag)||(e>.85&&Math.random()<S.ag&&!(big&&e<1)))act(i,'raise',to());
+   else if(e<.45&&!big&&Math.random()<S.bl*.4)act(i,'raise',to());
+   else if(e>thr)act(i,'call');
+   else act(i,'fold')}
+ }catch(x){if(G&&!G.done&&G.to===i)act(i,G.cur>G.players[i].bet?'fold':'call')}}
 const TL=30000,AW=5000,DC=3000;
 function arm(){
  clearTimeout(G.tt);G.dl=0;
